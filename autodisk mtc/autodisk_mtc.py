@@ -1,4 +1,5 @@
 import copy
+import os
 from scipy import stats,signal
 import numpy as np
 from skimage.transform import resize
@@ -6,6 +7,7 @@ from skimage import feature
 from skimage.feature import blob_log
 import matplotlib.pyplot as plt
 from mtc_helpers import *
+import multiprocessing as mp
 
 def readData(dname):   
     """
@@ -107,6 +109,30 @@ def drawDisks(pattern_in,disks,r):
     plt.show()
     
     pass
+
+def generateAvgPattern(data):
+    """
+    Generate an average (sum) pattern from the 4D dataset.
+
+    Parameters
+    ----------
+    data : 4D array of int or float
+        Array of the 4D dataset.
+
+    Returns
+    -------
+    avg_pat: 2D array of int or float
+        An average (sum) difffraction pattern.
+
+    """
+    pro_y,pro_x = data.shape[:2]
+    avg_pat = data[0,0]*1
+    avg_pat[:,:] = 0
+    for row in range (pro_y):
+        for col in range (pro_x):
+            avg_pat += data[row,col]
+    
+    return avg_pat
 
 def generateKernel(pattern,center_disk,r,c=0.7,pad=2,pre_def = False, maxed = True, plot = False):
     """
@@ -706,8 +732,17 @@ def latBack(refe_a,refe_b,angle):
     
     return a_init,b_init
 
-def process(data, row_idx, col_idx, kernel, r, center_disk, angle, lat_par, lock):
-    pattern = copy.deepcopy(data[row_idx,col_idx])
+def paramConstructor(data, kernel, r, center_disk, angle):
+    img_h,img_w,diff_pat_h,diff_pat_w = data.shape
+    params = []
+    for row_idx in range (img_h):
+        for col_idx in range (img_w):
+            params.append((data,row_idx,col_idx,kernel,r,center_disk,angle))
+    print('-----Params Constructed-----')
+    return params
+
+def processPattern(data, row_idx, col_idx, kernel, r, center_disk, angle):
+    pattern = data[row_idx,col_idx]
         
     cros_map = crossCorr(pattern,kernel)   
     disks = ctrDet(cros_map, r, kernel, 10, 10) 
@@ -731,9 +766,46 @@ def process(data, row_idx, col_idx, kernel, r, center_disk, angle, lat_par, lock
         ret_a,ret_b,ref_ctr2, mid_ctr,ref_ang = latFit(pattern,rot_ref_ctr,r)
         
         if any(ret_a!=0) and any(ret_b!=0):
-            a_back,b_back = latBack(ret_a, ret_b, angle+ref_ang)             
-            lock.acquire()
-            lat_par[row_idx,col_idx,0,:] = a_back
-            lat_par[row_idx,col_idx,1,:] = b_back
-            lock.release()
+            a_back,b_back = latBack(ret_a, ret_b, angle+ref_ang)
+            return_val = [row_idx, col_idx, a_back, b_back]
+            print(f'Process {os.getpid()} returned {return_val} for r:{row_idx}, c: {col_idx}')
+            return return_val
+
+def driver_func(data, kernel, r, center_disk, angle):
+    img_h,img_w,diff_pat_h,diff_pat_w = data.shape
+    PROCESSES = mp.cpu_count()
+    print(f'{PROCESSES} cores available')
+
+    #### probably a lot of time lost in pickling/unpickling data to send to each process ####
+    params = paramConstructor(data, kernel, r, center_disk, angle)
+    results = []
+    lattice_params = np.zeros((img_h,img_w,2,2),dtype = float)
+    with mp.Pool(PROCESSES) as pool:
+        for p in params:
+            results.append(pool.apply_async(processPattern, p))
+            print(f'Queued pattern: r:{p[1]}, c: {p[2]}')
+        n = 0
+        while True:
+            time.sleep(1)
+            n+=1
+            print(f'{n} seconds')
+            # catch exception if results are not ready yet
+            try:
+                ready = [result.ready() for result in results]
+                successful = [result.successful() for result in results]
+            except Exception:
+                continue
+            # exit loop if all tasks returned success
+            if all(successful):
+                break
+            # raise exception reporting exceptions received from workers
+            if all(ready) and not all(successful):
+                raise Exception(f'Workers raised following exceptions {[result._value for result in results if not result.successful()]}')
+    
+    for result in results:
+            lattice_params[result[0],result[1],0,:] = result[2]
+            lattice_params[result[0],result[1],1,:] = result[3]
+
+    return lattice_params
+        
     

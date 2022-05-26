@@ -35,3 +35,19 @@ def timeToFinish(imgh, imgw, avg_time, current_time):
     print(f'Current time = {round(current_time,2)}',flush=True)
     clear_output(wait=True)
     return avg_time 
+
+def store_lat(queue):
+    """
+    Read lattice parameters (produced by processing a diffraction pattern, see process()) from a queue and store to a lattice_params array.
+
+    Parameters
+    ----------
+    queue : mp.Queue object
+        Array of the 4D dataset.
+
+    Returns
+    -------
+    lattice_params: 2D array of arrays of float
+        2D array with each element as two arrays of lattice vectors.
+
+    """

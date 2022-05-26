@@ -157,29 +157,29 @@ def generateAdf(data,in_rad,out_rad,save=False):
   
 
 
-def generateAvgPattern(data):
-    """
-    Generate an average (sum) pattern from the 4D dataset.
+# def generateAvgPattern(data):
+#     """
+#     Generate an average (sum) pattern from the 4D dataset.
 
-    Parameters
-    ----------
-    data : 4D array of int or float
-        Array of the 4D dataset.
+#     Parameters
+#     ----------
+#     data : 4D array of int or float
+#         Array of the 4D dataset.
 
-    Returns
-    -------
-    avg_pat: 2D array of int or float
-        An average (sum) difffraction pattern.
+#     Returns
+#     -------
+#     avg_pat: 2D array of int or float
+#         An average (sum) difffraction pattern.
 
-    """
-    pro_y,pro_x = data.shape[:2]
-    avg_pat = data[0,0]*1
-    avg_pat[:,:] = 0
-    for row in range (pro_y):
-        for col in range (pro_x):
-            avg_pat += data[row,col]
+#     """
+#     pro_y,pro_x = data.shape[:2]
+#     avg_pat = data[0,0]*1
+#     avg_pat[:,:] = 0
+#     for row in range (pro_y):
+#         for col in range (pro_x):
+#             avg_pat += data[row,col]
     
-    return avg_pat
+#     return avg_pat
 
           
 
@@ -1075,13 +1075,13 @@ def drawCircles(ori_pattern,blobs_list,r):
 
 
 
-def latDist(lat_par,refe_a,refe_b,err=0.2):
+def latDist(lattice_params,refe_a,refe_b,err=0.2):
     """
     This function filters out the outliers of the lattice parameters based on the references.
 
     Parameters
     ----------
-    lat_par : 2D array of arrays of float
+    lattice_params : 2D array of arrays of float
         2D array with each element as two arrays of lattice vectors.
     refe_a : 1D array of float
         The reference lattice vector a.
@@ -1097,9 +1097,9 @@ def latDist(lat_par,refe_a,refe_b,err=0.2):
         (y of vector a, x of vector a, y of vector b, x of vector b).
 
     """
-    arr_vec = lat_par
+    arr_vec = lattice_params
     
-    sm_y,sm_x = lat_par.shape[:2]
+    sm_y,sm_x = lattice_params.shape[:2]
     std_ax = refe_a[1] # vec_a[0,std_2x]
     std_ay = refe_a[0]
     std_bx = refe_b[1] # vec_b[std_1y,std_1x]
