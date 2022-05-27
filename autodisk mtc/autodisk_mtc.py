@@ -732,14 +732,56 @@ def latBack(refe_a,refe_b,angle):
     
     return a_init,b_init
 
-def paramConstructor(data, kernel, r, center_disk, angle):
+def paramConstructor(PROCESSES, data, kernel, r, center_disk, angle):
     img_h,img_w,diff_pat_h,diff_pat_w = data.shape
+    full_pattern_list = []
+    for row_idx in range(img_h):
+        for col_idx in range(img_w):
+            full_pattern_list.append([row_idx,col_idx])
+    full_pattern_list = np.array_split(full_pattern_list, PROCESSES)
+
     params = []
-    for row_idx in range (img_h):
-        for col_idx in range (img_w):
-            params.append((data,row_idx,col_idx,kernel,r,center_disk,angle))
+    for pattern_list in full_pattern_list:
+        params.append((data,pattern_list,kernel,r,center_disk,angle))
+    
     print('-----Params Constructed-----')
     return params
+
+def processPatterns(data, pattern_list, kernel, r, center_disk, angle):
+    return_val = []
+
+    for pattern_coords in pattern_list:
+        row_idx = pattern_coords[0]
+        col_idx = pattern_coords[1]
+        pattern = data[row_idx,col_idx]
+            
+        cros_map = crossCorr(pattern,kernel)   
+        disks = ctrDet(cros_map, r, kernel, 10, 10) 
+        
+        if len(disks) > 5:
+            ctr_cur,r_cur = ctrRadiusIni(pattern)
+            if np.linalg.norm(ctr_cur-center_disk) <= 2: # 2px
+                ctr = ctr_cur
+            else:
+                ctr = center_disk
+                ctr[1] = np.round(ctr[1])
+                ctr[0] = np.round(ctr[0])            
+            
+            ref_ctr = radGradMax(pattern, disks, r,rn=20, ra=2, n_p=40, threshold=3)           
+            
+            ctr_vec = ref_ctr[:,:2] - ctr
+            ctr_diff = ctr_vec[:,0]**2 + ctr_vec[:,1]**2
+            ctr_idx = np.where(ctr_diff==ctr_diff.min())[0][0]
+            ref_ctr[ctr_idx,2] = 10**38
+            rot_ref_ctr = rotCtr(pattern,ref_ctr,angle)
+            ret_a,ret_b,ref_ctr2, mid_ctr,ref_ang = latFit(pattern,rot_ref_ctr,r)
+            
+            if any(ret_a!=0) and any(ret_b!=0):
+                a_back,b_back = latBack(ret_a, ret_b, angle+ref_ang)
+                return_val.append([row_idx, col_idx, a_back, b_back])
+                print(f'Process {os.getpid()} returned {[row_idx, col_idx, a_back, b_back]} for r:{row_idx}, c: {col_idx}')
+
+    return return_val
 
 def processPattern(data, row_idx, col_idx, kernel, r, center_disk, angle):
     pattern = data[row_idx,col_idx]
@@ -777,13 +819,12 @@ def driver_func(data, kernel, r, center_disk, angle):
     print(f'{PROCESSES} cores available')
 
     #### probably a lot of time lost in pickling/unpickling data to send to each process ####
-    params = paramConstructor(data, kernel, r, center_disk, angle)
+    params = paramConstructor(PROCESSES, data, kernel, r, center_disk, angle)
     results = []
     lattice_params = np.zeros((img_h,img_w,2,2),dtype = float)
     with mp.Pool(PROCESSES) as pool:
         for p in params:
-            results.append(pool.apply_async(processPattern, p))
-            print(f'Queued pattern: r:{p[1]}, c: {p[2]}')
+            results.append(pool.apply_async(processPatterns, p))
         n = 0
         while True:
             time.sleep(1)
@@ -802,7 +843,9 @@ def driver_func(data, kernel, r, center_disk, angle):
             if all(ready) and not all(successful):
                 raise Exception(f'Workers raised following exceptions {[result._value for result in results if not result.successful()]}')
     
-    for result in results:
+    for result_list in results:
+        result_list = result_list.get()
+        for result in result_list:
             lattice_params[result[0],result[1],0,:] = result[2]
             lattice_params[result[0],result[1],1,:] = result[3]
 

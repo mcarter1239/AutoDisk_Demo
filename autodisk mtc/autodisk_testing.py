@@ -49,7 +49,7 @@ if __name__ == '__main__':
 
     start = time.perf_counter()
     lattice_params = driver_func(data, kernel, r, center_disk, angle)
-    print(f'Took {time.perf_counter-start} seconds to complete')
+    print(f'Took {time.perf_counter()-start} seconds to complete')
 
     lat_fil = latDist(lattice_params,vec_a,vec_b)
     st_xx,st_yy,st_xy,st_yx,tha_ang = calcStrain(lat_fil, vec_a, vec_b)
