@@ -1,5 +1,6 @@
 import copy
 import os
+import cv2
 from scipy import stats,signal
 import numpy as np
 from skimage.transform import resize
@@ -8,6 +9,8 @@ from skimage.feature import blob_log
 import matplotlib.pyplot as plt
 from mtc_helpers import *
 import multiprocessing as mp
+from datetime import datetime
+import csv
 
 def readData(dname):   
     """
@@ -133,6 +136,361 @@ def generateAvgPattern(data):
             avg_pat += data[row,col]
     
     return avg_pat
+
+def detAng(ref_ctr,ctr,r): # threshold: accepted angle difference
+    """
+    Detect an angle to rotate the disk coordinates.
+
+    Parameters
+    ----------
+    ref_ctr : 2D array of float
+        Array of disk position coordinates and their corresponding weights
+    ctr : 1D array of float
+        Center of the zero-order disk.
+    r : float
+        Radius of the disks.
+
+    Returns
+    -------
+    wt_ang : float
+        The rotation angle.
+    ref_ctr : 2D array of float
+        Refined disk positions.
+
+    """
+    ctr_vec = ref_ctr[:,:2] - ctr
+    ctr_diff = ctr_vec[:,0]**2 + ctr_vec[:,1]**2
+    ctr_idx = np.where(ctr_diff==ctr_diff.min())[0][0]
+    
+    diff = ref_ctr[:,:2]-ctr
+    distance = diff[:,0]**2 + diff[:,1]**2
+    
+    dis_copy = copy.deepcopy(distance)
+    min_dis = []
+    while len(min_dis) <5:
+        cur_min = dis_copy.min()
+        idx_rem = np.where(dis_copy==cur_min)[0]
+        dis_copy = np.delete(dis_copy,idx_rem)
+        idx_ctr = np.where(distance==cur_min)[0]
+        if len(idx_ctr)==1:
+            min_dis.append(ref_ctr[idx_ctr[0],:2])
+        else:
+            for each in idx_ctr:   
+                min_dis.append(ref_ctr[each,:2])
+
+    min_dis_ctr = np.array(min_dis,dtype = int)
+    min_dis_ctr = np.delete(min_dis_ctr,0,axis = 0) # delete [0,0]
+
+    vec = min_dis_ctr-ctr
+       
+    ang = np.arctan2(vec[:,0],vec[:,1])* 180 / np.pi
+    
+    for i in range (len(ang)):
+        ang[i] = (180 + ang[i]) if (ang[i]<0) else ang[i]
+
+    cand_ang_idx = np.where(ang==ang.min())[0]
+    sup_pt = min_dis_ctr[cand_ang_idx] # the point retuning the smallest rotation angle
+
+
+    ref_diff = ctr-sup_pt
+    ini_ang = np.arctan2(ref_diff[:,0],ref_diff[:,1])*180/np.pi
+    all_ref = []
+    for n in range (len(ini_ang)):
+        all_ref.append(np.array([ini_ang[n]]))
+    if len(ref_diff)>1:
+        ref_diff = ref_diff[0]
+
+    for each_ctr in ref_ctr:
+        cur_vec = each_ctr[:2] - ref_diff
+        cur_diff = ref_ctr[:,:2]-cur_vec
+        cur_norm = np.linalg.norm(cur_diff,axis=1)
+        if cur_norm.min()<r:
+            ref_idx = np.where(cur_norm==cur_norm.min())[0]
+            ref_pt = ref_ctr[ref_idx]
+            ref_vec = ref_pt - each_ctr
+            all_ref.append(np.arctan2(ref_vec[:,0],ref_vec[:,1])* 180 / np.pi)
+    
+    for i in range (len(all_ref)):
+        if all_ref[i]<0:
+            all_ref[i] = 180 + all_ref[i]
+        elif all_ref[i] >= 180:
+            all_ref[i] = 180 - all_ref[i]
+        
+    wt_ang = np.mean(all_ref)
+    ref_ctr[ctr_idx,2] = 10**38
+    
+    return wt_ang, ref_ctr
+
+def rotImg(image, angle, ctr):
+    """
+    Rotate a pattern.
+
+    Parameters
+    ----------
+    image : 2D array of int or float
+        The input pattern.
+    angle : float
+        An angel to rotate.
+    ctr : 1D array of int or float
+        The rotation center.
+
+    Returns
+    -------
+    result : 2D array of int or float
+        The rotated pattern.
+
+    """
+    image_center = tuple(np.array([ctr[0],ctr[1]]))
+    rot_mat = cv2.getRotationMatrix2D(image_center, angle, 1.0)
+    result = cv2.warpAffine(image, rot_mat, image.shape[1::-1], flags=cv2.INTER_LINEAR)
+    
+    return result
+
+def delArti(gen_lat_pt,ref_ctr,r):
+    """
+    Delete any artificial lattice points.
+
+    Parameters
+    ----------
+    gen_lat_pt : 2D array of float
+        Array of artificial disk positions.
+    ref_ctr : 2D array of float
+        Array of detected disk positions.
+    r : float
+        Radius of the disks.
+
+    Returns
+    -------
+    gen_lat_pt_up : 2D array of float
+        A filtered array of disk positions.
+
+    """
+    gen_lat_pt_up = []
+    for i in range (len(gen_lat_pt)):
+        dif_gen_ref = np.array(gen_lat_pt[i] - ref_ctr[:,:2])
+        dif_gen_ref_norm = np.linalg.norm(dif_gen_ref,axis = 1)
+        if dif_gen_ref_norm.min()< r:
+            gen_lat_pt_up.append(gen_lat_pt[i])
+    
+    gen_lat_pt_up = np.array(gen_lat_pt_up)
+    
+    return gen_lat_pt_up
+
+def genLat(pattern, ret_a,ret_b, mid_ctr,r):
+    """
+    Generate a matrix of hypothetical lattice points.
+
+    Parameters
+    ----------
+    pattern : 2D array of int or float
+        A diffraction pattern.
+    ret_a : 1D array of float
+        The horizontal lattice vector a.
+    ret_b : 1D array of float
+        The non-horizontal lattice vector b.
+    mid_ctr : a list of arrays of float
+        a list of disk positions which are in the middle row.
+    r : float
+        Radius of the disks.
+
+    Returns
+    -------
+    final_ctr : 2D array of float
+        Disk positions in the hypothetical lattice.
+
+    """
+    img = pattern
+    veca,vecb = ret_a,ret_b
+    h,w = img.shape
+    veca_ct = mid_ctr[:,:2].copy()
+    final_ctr = []
+    
+    for cur_veca_ct in veca_ct:
+        # one side    
+        cur_h1 = cur_veca_ct[0]
+        cur_w1 = cur_veca_ct[1]
+        cur_ct1 = cur_veca_ct*1
+
+        while cur_h1>=0 and cur_h1<=h and cur_w1>=0 and cur_w1<=w:
+            cur_h1,cur_w1 = cur_ct1-vecb
+            if cur_h1>=0 and cur_h1<=h and cur_w1>=0 and cur_w1<=w:
+                cur_ct1 = [cur_h1,cur_w1]
+                final_ctr.append([cur_h1,cur_w1])
+        
+        # the other side
+        cur_h2 = cur_veca_ct[0]
+        cur_w2 = cur_veca_ct[1]
+        cur_ct2 = cur_veca_ct*1
+
+        while cur_h2>=0 and cur_h2<=h and cur_w2>=0 and cur_w2<=w:
+            cur_h2,cur_w2 = cur_ct2+vecb
+            if cur_h2>=0 and cur_h2<=h and cur_w2>=0 and cur_w2<=w:
+                cur_ct2 = [cur_h2,cur_w2]
+                final_ctr.append([cur_h2,cur_w2])  
+
+    ########   Check Again ########
+    chk_lat_ctr= final_ctr
+    
+    for cur_vec2_ct in chk_lat_ctr:
+        # one side    
+        cur_h1 = cur_vec2_ct[0]
+        cur_w1 = cur_vec2_ct[1]
+        cur_ct1 = cur_vec2_ct*1
+        while cur_h1>=0 and cur_h1<=h and cur_w1>=0 and cur_w1<=w:
+                cur_h1,cur_w1 = cur_ct1-veca
+                # print(cur_ct1-veca,cur_h1,cur_w1)
+                if cur_h1>=0 and cur_h1<=h and cur_w1>=0 and cur_w1<=w:
+                    cur_ct1 = [cur_h1,cur_w1]
+                    dif_chk = [(ct[0]-cur_ct1[0])**2+(ct[1]-cur_ct1[1])**2 for ct in chk_lat_ctr]
+                    if min(dif_chk)> r**2: 
+                        final_ctr.append([cur_h1,cur_w1])
+        
+        # the other side
+        cur_h2 = cur_vec2_ct[0]
+        cur_w2 = cur_vec2_ct[1]
+        cur_ct2 = cur_vec2_ct*1
+        while cur_h2>=0 and cur_h2<=h and cur_w2>=0 and cur_w2<=w:
+            cur_h2,cur_w2 = cur_ct2+veca
+            if cur_h2>=0 and cur_h2<=h and cur_w2>=0 and cur_w2<=w:
+                cur_ct2 = [cur_h2,cur_w2]   
+                dif_chk2 = [(ct[0]-cur_ct2[0])**2+(ct[1]-cur_ct2[1])**2 for ct in chk_lat_ctr]
+                if min(dif_chk2)> r**2:  
+                    final_ctr.append([cur_h2,cur_w2])   
+                                 
+    for pt in mid_ctr:
+        final_ctr.append(pt)
+    
+    final_ctr = np.array(final_ctr)
+                    
+    return final_ctr
+
+def latDist(lattice_params,refe_a,refe_b,err=0.2):
+    """
+    This function filters out the outliers of the lattice parameters based on the references.
+
+    Parameters
+    ----------
+    lattice_params : 2D array of arrays of float
+        2D array with each element as two arrays of lattice vectors.
+    refe_a : 1D array of float
+        The reference lattice vector a.
+    refe_b : 1D array of float
+        The reference lattice vector b.
+    err : float, optional
+        Acceptable error percentage. The default is 0.2 (20%).
+
+    Returns
+    -------
+    store_whole : 3D array of float
+        Array containing 3 columns, y coordinate, x coordinate, and 4 lattice vector elements
+        (y of vector a, x of vector a, y of vector b, x of vector b).
+
+    """
+    arr_vec = lattice_params
+    
+    sm_y,sm_x = lattice_params.shape[:2]
+    std_ax = refe_a[1] # vec_a[0,std_2x]
+    std_ay = refe_a[0]
+    std_bx = refe_b[1] # vec_b[std_1y,std_1x]
+    std_by = refe_b[0]
+    
+    acc_ax_min = std_ax*(1-err) if std_ax>0 else std_ax*(1+err)
+    acc_ax_max = std_ax*(1+err) if std_ax>0 else std_ax*(1-err)
+    acc_ay_min = std_ay*(1-err) if std_ay>0 else std_ay*(1+err)
+    acc_ay_max = std_ay*(1+err) if std_ay>0 else std_ay*(1-err)
+    acc_bx_min = std_bx*(1-err) if std_bx>0 else std_bx*(1+err)
+    acc_bx_max = std_bx*(1+err) if std_bx>0 else std_bx*(1-err)
+    acc_by_min = std_by*(1-err) if std_by>0 else std_by*(1+err)
+    acc_by_max = std_by*(1+err) if std_by>0 else std_by*(1-err)
+    
+    store_whole = np.zeros((sm_y,sm_x,4),dtype = float)
+
+    # Delete paramater outliers
+    ct = 0
+    for row in range (sm_y):
+        for col in range (sm_x):
+            
+            each = arr_vec[row,col]
+        
+            gax = float(each[0,1])
+            gay = float(each[0,0])
+            gbx = float(each[1,1])  
+            gby = float(each[1,0])
+            
+            if gax>acc_ax_max or gax<acc_ax_min or gay>acc_ay_max or gay<acc_ay_min or gbx>acc_bx_max or gbx<acc_bx_min or gby>acc_by_max or gby<acc_by_min:
+                ct += 1
+    
+            else:
+                store_whole[row,col][0] = gay        
+                store_whole[row,col][1] = gax
+                store_whole[row,col][2] = gby
+                store_whole[row,col][3] = gbx                
+
+    return store_whole       
+
+def calcStrain(lat_fil, refe_a,refe_b):
+    """
+    Compute strain maps.
+    
+    Parameters
+    ----------
+    lat_fil : 2D array of arrays of float
+        2D array with each element as two lattice vectors.
+    refe_a : 1D array of float 
+        The reference vector a.
+    refe_b : 1D array of float
+        The reference vector b.
+
+    Returns
+    -------
+    st_xx : 2D array of float
+        Estimated strain along the x direction.
+    st_yy : 2D array of float
+        Estimated strain along the y direction.
+    st_xy : 2D array of float
+        Shear strain.
+    st_yx : 2D array of float
+        Shear strain.
+    tha_ang : 2D array of float
+        Angle of lattice rotation in deg.
+
+    """
+    sm_y,sm_x = lat_fil.shape[:2]
+    
+    st_xx = np.zeros((sm_y,sm_x),dtype=float)
+    st_yx = np.zeros((sm_y,sm_x),dtype=float)
+    st_xy = np.zeros((sm_y,sm_x),dtype=float)
+    st_yy = np.zeros((sm_y,sm_x),dtype=float)
+    tha_ang = np.zeros((sm_y,sm_x),dtype=float)
+    
+    G0_T = np.array([[refe_a[1],refe_a[0]],[refe_b[1],refe_b[0]]])
+    
+    for row in range (sm_y):
+        for col in range (sm_x):
+            if any(lat_fil[row,col]!=0):
+                gay,gax,gby,gbx = lat_fil[row,col]
+    
+                G = np.array([[gax,gbx],[gay,gby]])
+                G_T = np.transpose(G)
+                G_T_n1 = np.linalg.inv(G_T)
+                
+                D = G_T_n1.dot(G0_T)
+                theta = np.arctan2((D[1,0]-D[0,1]),(D[0,0]+D[1,1]))
+                
+                M = np.array([[np.cos(theta),np.sin(theta)],[-np.sin(theta),np.cos(theta)]])
+                
+                F = M.dot(D)
+                I = np.array([[1,0],[0,1]])
+                
+                eps = F-I
+                
+                st_xx[row,col] = eps[0,0]
+                st_yy[row,col] = eps[1,1] 
+                st_xy[row,col] = eps[0,1]
+                st_yx[row,col] = eps[1,0] 
+                tha_ang[row,col] = theta/np.pi*180
+
+    return st_xx,st_yy,st_xy,st_yx,tha_ang
 
 def generateKernel(pattern,center_disk,r,c=0.7,pad=2,pre_def = False, maxed = True, plot = False):
     """
@@ -818,7 +1176,6 @@ def driver_func(data, kernel, r, center_disk, angle):
     PROCESSES = mp.cpu_count()
     print(f'{PROCESSES} cores available')
 
-    #### probably a lot of time lost in pickling/unpickling data to send to each process ####
     params = paramConstructor(PROCESSES, data, kernel, r, center_disk, angle)
     results = []
     lattice_params = np.zeros((img_h,img_w,2,2),dtype = float)
@@ -851,4 +1208,8 @@ def driver_func(data, kernel, r, center_disk, angle):
 
     return lattice_params
         
-    
+def saveResults(results):
+    filename = str(datetime.now()).split('.')[0].replace(':','_') + '.csv'
+    with open(filename,'w',newline='') as f:
+        writer = csv.writer(f)
+        writer.writerows(results)

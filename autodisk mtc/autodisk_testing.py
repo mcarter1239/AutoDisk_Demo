@@ -1,8 +1,7 @@
 # Imports
 
-from autodisk import *
 from autodisk_mtc import *
-from mtc_helpers import *
+
 if __name__ == '__main__':
     # Input and sanitize 4D-STEM file.
 
@@ -45,7 +44,6 @@ if __name__ == '__main__':
     generated_lattice_pts = delArti(generated_lattice_pts,rotated_refined_disks_weights,r)
     rotated_pattern = rotImg(avg_pattern, angle+angle_delta, center_disk)
     vec_a, vec_b= latBack(vec_a_rotated, vec_b_rotated, angle)
-    drawDisks(np.sqrt(rotated_pattern),generated_lattice_pts,r)
 
     start = time.perf_counter()
     lattice_params = driver_func(data, kernel, r, center_disk, angle)
@@ -86,3 +84,4 @@ if __name__ == '__main__':
         
     plt.subplots_adjust(wspace=0.25,hspace=0.25)
     plt.show()
+    saveResults(lattice_params)
