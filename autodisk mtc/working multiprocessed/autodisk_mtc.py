@@ -1210,16 +1210,6 @@ def driver_func(data, kernel, r, center_disk, angle):
         
 def saveResults(results):
     filename = str(datetime.now()).split('.')[0].replace(':','_') + '.csv'
-    with open(filename,'w') as f:
+    with open(filename,'w',newline='') as f:
         writer = csv.writer(f)
         writer.writerows(results)
-    return filename
-
-def testResults(results_file, test_file):
-    with open(results_file, 'r') as res, open(test_file, 'r') as test:
-        results = res.readlines()
-        testset = test.readlines()
-
-    for row in results:
-        if row not in testset:
-            print(row)

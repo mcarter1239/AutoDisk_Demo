@@ -84,7 +84,4 @@ if __name__ == '__main__':
         
     plt.subplots_adjust(wspace=0.25,hspace=0.25)
     plt.show()
-    results = saveResults(lattice_params)
-    lattice_params += 10
-    wrong = saveResults(lattice_params)
-    testResults(results, wrong)
+    saveResults(lattice_params)
