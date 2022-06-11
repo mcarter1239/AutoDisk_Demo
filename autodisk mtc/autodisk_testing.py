@@ -1,5 +1,6 @@
 # Imports
 
+from numpy import true_divide
 from autodisk_mtc import *
 
 if __name__ == '__main__':
@@ -10,19 +11,36 @@ if __name__ == '__main__':
     data = preProcess(data)
     img_h,img_w,diff_pat_h,diff_pat_w = data.shape
 
-    # Determine center disk position and radius from sum pattern
+    # Try to find a vacuum pattern, and use that to determine center disk position and radius
 
-    avg_pattern = generateAvgPattern(data)
-    center_disk,r = ctrRadiusIni(avg_pattern)
+    for row_idx in range(img_h):
+        for col_idx in range(img_w):
+            if isVacuum(data[row_idx,col_idx]):
+                center_disk,r = ctrRadiusIni(data[row_idx,col_idx])
+                kernel_pattern = data[row_idx,col_idx]
+                break
+        try:
+            center_disk in locals()
+            break
+        except:
+            pass
+
+    # Determine center disk position and radius from sum pattern if no vacuum patterns found
+    try:
+            center_disk in locals()
+    except:
+        avg_pattern = generateAvgPattern(data)
+        kernel_pattern = avg_pattern
+        center_disk,r = ctrRadiusIni(avg_pattern)
 
     # Generate kernel, then cross-correlate
 
-    kernel = generateKernel(avg_pattern,center_disk,r,0.7,2)
-    cros_map = crossCorr(avg_pattern,kernel)
+    kernel = generateKernel(kernel_pattern,center_disk,r)
+    cros_map = crossCorr(kernel_pattern,kernel)
 
     # Detect disks and refine positions with radial gradient maximization
 
-    detected_disks = ctrDet(cros_map, r, kernel, 10, 5)
+    detected_disks = ctrDet(cros_map, r, kernel)
     refined_disks_weights = radGradMax(avg_pattern, detected_disks, r,ra=4)
     refined_disks_list = refined_disks_weights[:,:2]
     print(refined_disks_list)
@@ -85,6 +103,4 @@ if __name__ == '__main__':
     plt.subplots_adjust(wspace=0.25,hspace=0.25)
     plt.show()
     results = saveResults(lattice_params)
-    lattice_params += 10
-    wrong = saveResults(lattice_params)
-    testResults(results, wrong)
+    testResults(results, 'testset.csv')

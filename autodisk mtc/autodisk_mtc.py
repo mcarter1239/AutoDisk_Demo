@@ -104,8 +104,8 @@ def drawDisks(pattern_in,disks,r):
     
     fig, ax = plt.subplots(figsize = (5,5))
     ax.imshow(pattern,cmap='gray')
-    for blob in disks:
-        y, x = blob
+    for disk in disks:
+        y, x = disk
         c = plt.Circle((x, y),r, color='red', linewidth=2, fill=False)
         ax.add_patch(c)
     
@@ -230,7 +230,7 @@ def rotImg(image, angle, ctr):
     image : 2D array of int or float
         The input pattern.
     angle : float
-        An angel to rotate.
+        An angle to rotate.
     ctr : 1D array of int or float
         The rotation center.
 
@@ -618,11 +618,11 @@ def ctrDet(pattern, r, kernel, n_sigma=10, thred=0.1, ovl=0):
     thred : float, optional
         The absolute lower bound for scale space maxima. The default is 0.1.
     ovl : float, optional
-        Acceptable overlapping area of the blobs. The default is 0.
+        Acceptable overlapping area of the disks. The default is 0.
 
     Returns
     -------
-    blobs : 2D array of int
+    disks : 2D array of int
          Corrdinates of the detected disk position.
 
     """
@@ -634,7 +634,7 @@ def ctrDet(pattern, r, kernel, n_sigma=10, thred=0.1, ovl=0):
     img[f_size:pattern.shape[0]+f_size,f_size:pattern.shape[1]+f_size] = pattern 
     sh,sw = img.shape
 
-    blobs_log = blob_log(img, 
+    disks_log = blob_log(img, 
                  min_sigma=adjr,
                  max_sigma=adjr, 
                  num_sigma=n_sigma, 
@@ -643,16 +643,16 @@ def ctrDet(pattern, r, kernel, n_sigma=10, thred=0.1, ovl=0):
     
     rem = []
     f_size = len(kernel)
-    for i in range (len(blobs_log)):
-        if np.any(blobs_log[i,:2]<f_size+5) or np.any(blobs_log[i,0]>sh-f_size-5) or np.any(blobs_log[i,1]>sw-f_size-5):
+    for i in range (len(disks_log)):
+        if np.any(disks_log[i,:2]<f_size+5) or np.any(disks_log[i,0]>sh-f_size-5) or np.any(disks_log[i,1]>sw-f_size-5):
             rem.append(i)
     
-    blobs_log_out = np.delete(blobs_log, rem, axis =0)
-    blobs_log_out -= f_size 
+    disks_log_out = np.delete(disks_log, rem, axis =0)
+    disks_log_out -= f_size 
     
-    blobs =  blobs_log_out[:,:2].astype(int)
+    disks =  disks_log_out[:,:2].astype(int)
     
-    return blobs
+    return disks
 
 def ctrRadiusIni(pattern):
     """
@@ -734,7 +734,7 @@ def rotCtr(pattern,ref_ctr,angle):
 
     return ctr_new
 
-def radGradMax(sample, blobs, r, rn=20, ra=2, n_p=40, threshold=3): 
+def radGradMax(sample, disks, r, rn=20, ra=2, n_p=40, threshold=3): 
     """
     Radial gradient Maximum process.
 
@@ -742,8 +742,8 @@ def radGradMax(sample, blobs, r, rn=20, ra=2, n_p=40, threshold=3):
     ----------
     sample : 2D array of float or int
         The diffraction pattern.
-    blobs : 2D array of int or float
-        Blob coordinates.
+    disks : 2D array of int or float
+        disk coordinates.
     r : float
         Radius of the disk
     rn : int, optional
@@ -761,7 +761,7 @@ def radGradMax(sample, blobs, r, rn=20, ra=2, n_p=40, threshold=3):
         Array with three columns, y component, x component and the weight of each detected disk.
 
     """
-    ori_ctr = blobs    
+    ori_ctr = disks    
     h,w = sample.shape        
     adjr = r * 1   
     r_scale = np.linspace(adjr*0.8, adjr*1.2, rn)    
@@ -1090,7 +1090,7 @@ def latBack(refe_a,refe_b,angle):
     
     return a_init,b_init
 
-def paramConstructor(PROCESSES, data, kernel, r, center_disk, angle):
+def paramConstructor(PROCESSES, data, kernel, r, center_disk):
     img_h,img_w,diff_pat_h,diff_pat_w = data.shape
     full_pattern_list = []
     for row_idx in range(img_h):
@@ -1100,12 +1100,12 @@ def paramConstructor(PROCESSES, data, kernel, r, center_disk, angle):
 
     params = []
     for pattern_list in full_pattern_list:
-        params.append((data,pattern_list,kernel,r,center_disk,angle))
+        params.append((data,pattern_list,kernel,r,center_disk))
     
     print('-----Params Constructed-----')
     return params
 
-def processPatterns(data, pattern_list, kernel, r, center_disk, angle):
+def processPatterns(data, pattern_list, kernel, r, center_disk):
     return_val = []
 
     for pattern_coords in pattern_list:
@@ -1114,7 +1114,7 @@ def processPatterns(data, pattern_list, kernel, r, center_disk, angle):
         pattern = data[row_idx,col_idx]
             
         cros_map = crossCorr(pattern,kernel)   
-        disks = ctrDet(cros_map, r, kernel, 10, 10) 
+        disks = ctrDet(pattern, r, kernel)
         
         if len(disks) > 5:
             ctr_cur,r_cur = ctrRadiusIni(pattern)
@@ -1125,58 +1125,26 @@ def processPatterns(data, pattern_list, kernel, r, center_disk, angle):
                 ctr[1] = np.round(ctr[1])
                 ctr[0] = np.round(ctr[0])            
             
-            ref_ctr = radGradMax(pattern, disks, r,rn=20, ra=2, n_p=40, threshold=3)           
+            refined_disks = radGradMax(pattern, disks, r,rn=20, ra=2, n_p=40, threshold=3)           
             
-            ctr_vec = ref_ctr[:,:2] - ctr
+            ctr_vec = refined_disks[:,:2] - ctr
             ctr_diff = ctr_vec[:,0]**2 + ctr_vec[:,1]**2
             ctr_idx = np.where(ctr_diff==ctr_diff.min())[0][0]
-            ref_ctr[ctr_idx,2] = 10**38
-            rot_ref_ctr = rotCtr(pattern,ref_ctr,angle)
-            ret_a,ret_b,ref_ctr2, mid_ctr,ref_ang = latFit(pattern,rot_ref_ctr,r)
+            refined_disks[ctr_idx,2] = 10**38
+            vec_a, vec_b = latFit(pattern,refined_disks,r)
             
-            if any(ret_a!=0) and any(ret_b!=0):
-                a_back,b_back = latBack(ret_a, ret_b, angle+ref_ang)
-                return_val.append([row_idx, col_idx, a_back, b_back])
-                print(f'Process {os.getpid()} returned {[row_idx, col_idx, a_back, b_back]} for r:{row_idx}, c: {col_idx}')
+            if any(vec_a!=0) and any(vec_b!=0):
+                return_val.append([row_idx, col_idx, vec_a, vec_b])
+                print(f'Process {os.getpid()} returned {[row_idx, col_idx, vec_a, vec_b]} for r:{row_idx}, c: {col_idx}')
 
     return return_val
-
-def processPattern(data, row_idx, col_idx, kernel, r, center_disk, angle):
-    pattern = data[row_idx,col_idx]
-        
-    cros_map = crossCorr(pattern,kernel)   
-    disks = ctrDet(cros_map, r, kernel, 10, 10) 
-    
-    if len(disks) > 5:
-        ctr_cur,r_cur = ctrRadiusIni(pattern)
-        if np.linalg.norm(ctr_cur-center_disk) <= 2: # 2px
-            ctr = ctr_cur
-        else:
-            ctr = center_disk
-            ctr[1] = np.round(ctr[1])
-            ctr[0] = np.round(ctr[0])            
-        
-        ref_ctr = radGradMax(pattern, disks, r,rn=20, ra=2, n_p=40, threshold=3)           
-        
-        ctr_vec = ref_ctr[:,:2] - ctr
-        ctr_diff = ctr_vec[:,0]**2 + ctr_vec[:,1]**2
-        ctr_idx = np.where(ctr_diff==ctr_diff.min())[0][0]
-        ref_ctr[ctr_idx,2] = 10**38
-        rot_ref_ctr = rotCtr(pattern,ref_ctr,angle)
-        ret_a,ret_b,ref_ctr2, mid_ctr,ref_ang = latFit(pattern,rot_ref_ctr,r)
-        
-        if any(ret_a!=0) and any(ret_b!=0):
-            a_back,b_back = latBack(ret_a, ret_b, angle+ref_ang)
-            return_val = [row_idx, col_idx, a_back, b_back]
-            print(f'Process {os.getpid()} returned {return_val} for r:{row_idx}, c: {col_idx}')
-            return return_val
 
 def driver_func(data, kernel, r, center_disk, angle):
     img_h,img_w,diff_pat_h,diff_pat_w = data.shape
     PROCESSES = mp.cpu_count()
     print(f'{PROCESSES} cores available')
 
-    params = paramConstructor(PROCESSES, data, kernel, r, center_disk, angle)
+    params = paramConstructor(PROCESSES, data, kernel, r, center_disk)
     results = []
     lattice_params = np.zeros((img_h,img_w,2,2),dtype = float)
     with mp.Pool(PROCESSES) as pool:
@@ -1207,7 +1175,49 @@ def driver_func(data, kernel, r, center_disk, angle):
             lattice_params[result[0],result[1],1,:] = result[3]
 
     return lattice_params
-        
+
+def isVacuum(pattern):
+    # center_disk,r = ctrRadiusIni(pattern)
+    # kernel = generateKernel(pattern,center_disk,r)
+    # cros_map = crossCorr(pattern,kernel)
+    # disks = ctrDet(cros_map, r, kernel)
+    # refined_disks = radGradMax(pattern, disks, r)[:,:2]
+    # if len(refined_disks) == 1:
+    #     return True
+    return False 
+
+def radialIntensity(pattern, plot=False):
+    center_disk,r = ctrRadiusIni(pattern)
+    drawDisks(pattern,np.array([center_disk]),r)
+    center_disk = radGradMax(pattern,np.array([center_disk]),r)[:,:2]
+    drawDisks(pattern,center_disk,r)
+    # Get image parameters
+    cen_x = center_disk[0,0]
+    cen_y = center_disk[0,1]
+    a = pattern.shape[0]
+    b = pattern.shape[1]
+
+    [X, Y] = np.meshgrid(np.arange(b) - cen_x, np.arange(a) - cen_y)
+    R = np.sqrt(np.square(X) + np.square(Y))
+
+    rad = np.arange(1, np.max(R), 1)
+    intensity = np.zeros(len(rad))
+    index = 0
+
+    for i in rad:
+        mask = np.greater(R, i - 2) & np.less(R, i + 2)
+        values = pattern[mask]
+        intensity[index] = np.mean(values)
+        index += 1
+
+    if plot:
+        plt.plot(rad, intensity)
+        plt.xlabel('Radius (px)')
+        plt.ylabel('Intensity')
+        plt.show()
+    
+    return rad, intensity
+
 def saveResults(results):
     filename = str(datetime.now()).split('.')[0].replace(':','_') + '.csv'
     with open(filename,'w') as f:

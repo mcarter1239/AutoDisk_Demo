@@ -17,12 +17,12 @@ if __name__ == '__main__':
 
     # Generate kernel, then cross-correlate
 
-    kernel = generateKernel(avg_pattern,center_disk,r,0.7,2)
+    kernel = generateKernel(avg_pattern,center_disk,r)
     cros_map = crossCorr(avg_pattern,kernel)
 
     # Detect disks and refine positions with radial gradient maximization
 
-    detected_disks = ctrDet(cros_map, r, kernel, 10, 5)
+    detected_disks = ctrDet(cros_map, r, kernel)
     refined_disks_weights = radGradMax(avg_pattern, detected_disks, r,ra=4)
     refined_disks_list = refined_disks_weights[:,:2]
     print(refined_disks_list)

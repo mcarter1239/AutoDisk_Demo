@@ -1,5 +1,6 @@
 import copy
 import os
+import time
 import cv2
 from scipy import stats,signal
 import numpy as np
@@ -7,7 +8,6 @@ from skimage.transform import resize
 from skimage import feature
 from skimage.feature import blob_log
 import matplotlib.pyplot as plt
-from mtc_helpers import *
 import multiprocessing as mp
 from datetime import datetime
 import csv
@@ -419,6 +419,7 @@ def latDist(lattice_params,refe_a,refe_b,err=0.2):
             
             if gax>acc_ax_max or gax<acc_ax_min or gay>acc_ay_max or gay<acc_ay_min or gbx>acc_bx_max or gbx<acc_bx_min or gby>acc_by_max or gby<acc_by_min:
                 ct += 1
+                print(f'Removed vectors for r:{row}, c:{col}')
     
             else:
                 store_whole[row,col][0] = gay        
@@ -1207,9 +1208,50 @@ def driver_func(data, kernel, r, center_disk, angle):
             lattice_params[result[0],result[1],1,:] = result[3]
 
     return lattice_params
-        
+
+def radialIntensity(pattern, plot=False):
+    center_disk,r = ctrRadiusIni(pattern)
+    drawDisks(pattern,np.array([center_disk]),r)
+    center_disk = radGradMax(pattern,np.array([center_disk]),r)[:,:2]
+    drawDisks(pattern,center_disk,r)
+    # Get image parameters
+    cen_x = center_disk[0,0]
+    cen_y = center_disk[0,1]
+    a = pattern.shape[0]
+    b = pattern.shape[1]
+
+    [X, Y] = np.meshgrid(np.arange(b) - cen_x, np.arange(a) - cen_y)
+    R = np.sqrt(np.square(X) + np.square(Y))
+
+    rad = np.arange(1, np.max(R), 1)
+    intensity = np.zeros(len(rad))
+    index = 0
+
+    for i in rad:
+        mask = np.greater(R, i - 2) & np.less(R, i + 2)
+        values = pattern[mask]
+        intensity[index] = np.mean(values)
+        index += 1
+
+    if plot:
+        plt.plot(rad, intensity)
+        plt.xlabel('Radius (px)')
+        plt.ylabel('Intensity')
+        plt.show()
+    
+    return rad, intensity
+
 def saveResults(results):
     filename = str(datetime.now()).split('.')[0].replace(':','_') + '.csv'
     with open(filename,'w',newline='') as f:
         writer = csv.writer(f)
         writer.writerows(results)
+
+def testResults(results_file, test_file):
+    with open(results_file, 'r') as res, open(test_file, 'r') as test:
+        results = res.readlines()
+        testset = test.readlines()
+
+    for row in results:
+        if row not in testset:
+            print(row)
