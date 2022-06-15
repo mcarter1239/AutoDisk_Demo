@@ -9,7 +9,7 @@ if __name__ == '__main__':
     data = readData(data_name)
     data = preProcess(data)
     img_h,img_w,diff_pat_h,diff_pat_w = data.shape
-
+    print(img_h)
     # Determine center disk position and radius from sum pattern
 
     avg_pattern = generateAvgPattern(data)
@@ -40,8 +40,6 @@ if __name__ == '__main__':
 
     print('Two lattice vectors: vector_a--[',vec_a_rotated[0],vec_a_rotated[1], '] and vector_b--[',vec_b_rotated[0],vec_b_rotated[1],']')
 
-    generated_lattice_pts = genLat(avg_pattern, vec_a_rotated, vec_b_rotated, middle_row_disks,r)
-    generated_lattice_pts = delArti(generated_lattice_pts,rotated_refined_disks_weights,r)
     rotated_pattern = rotImg(avg_pattern, angle+angle_delta, center_disk)
     vec_a, vec_b= latBack(vec_a_rotated, vec_b_rotated, angle)
 

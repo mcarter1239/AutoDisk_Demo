@@ -419,7 +419,7 @@ def latDist(lattice_params,refe_a,refe_b,err=0.2):
             
             if gax>acc_ax_max or gax<acc_ax_min or gay>acc_ay_max or gay<acc_ay_min or gbx>acc_bx_max or gbx<acc_bx_min or gby>acc_by_max or gby<acc_by_min:
                 ct += 1
-                print(f'Removed vectors for r:{row}, c:{col}')
+                print(f'Removed vectors for r:{row}, c:{col}. Total removed: {ct}.')
     
             else:
                 store_whole[row,col][0] = gay        
@@ -1209,14 +1209,13 @@ def driver_func(data, kernel, r, center_disk, angle):
 
     return lattice_params
 
-def radialIntensity(pattern, plot=False):
-    center_disk,r = ctrRadiusIni(pattern)
-    drawDisks(pattern,np.array([center_disk]),r)
-    center_disk = radGradMax(pattern,np.array([center_disk]),r)[:,:2]
-    drawDisks(pattern,center_disk,r)
+def radialIntensity(pattern, cen_x=None, cen_y=None, plot=False):
+    if cen_x == None or cen_y == None:    
+        center_disk,r = ctrRadiusIni(pattern)
+        cen_x = center_disk[0]
+        cen_y = center_disk[1]
+    print('here')
     # Get image parameters
-    cen_x = center_disk[0,0]
-    cen_y = center_disk[0,1]
     a = pattern.shape[0]
     b = pattern.shape[1]
 

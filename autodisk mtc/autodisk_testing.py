@@ -1,6 +1,5 @@
 # Imports
 
-from numpy import true_divide
 from autodisk_mtc import *
 
 if __name__ == '__main__':
@@ -10,33 +9,16 @@ if __name__ == '__main__':
     data = readData(data_name)
     data = preProcess(data)
     img_h,img_w,diff_pat_h,diff_pat_w = data.shape
+    print(img_h)
+    # Determine center disk position and radius from sum pattern
 
-    # Try to find a vacuum pattern, and use that to determine center disk position and radius
-
-    for row_idx in range(img_h):
-        for col_idx in range(img_w):
-            if isVacuum(data[row_idx,col_idx]):
-                center_disk,r = ctrRadiusIni(data[row_idx,col_idx])
-                kernel_pattern = data[row_idx,col_idx]
-                break
-        try:
-            center_disk in locals()
-            break
-        except:
-            pass
-
-    # Determine center disk position and radius from sum pattern if no vacuum patterns found
-    try:
-            center_disk in locals()
-    except:
-        avg_pattern = generateAvgPattern(data)
-        kernel_pattern = avg_pattern
-        center_disk,r = ctrRadiusIni(avg_pattern)
+    avg_pattern = generateAvgPattern(data)
+    center_disk,r = ctrRadiusIni(avg_pattern)
 
     # Generate kernel, then cross-correlate
 
-    kernel = generateKernel(kernel_pattern,center_disk,r)
-    cros_map = crossCorr(kernel_pattern,kernel)
+    kernel = generateKernel(avg_pattern,center_disk,r)
+    cros_map = crossCorr(avg_pattern,kernel)
 
     # Detect disks and refine positions with radial gradient maximization
 
@@ -58,8 +40,6 @@ if __name__ == '__main__':
 
     print('Two lattice vectors: vector_a--[',vec_a_rotated[0],vec_a_rotated[1], '] and vector_b--[',vec_b_rotated[0],vec_b_rotated[1],']')
 
-    generated_lattice_pts = genLat(avg_pattern, vec_a_rotated, vec_b_rotated, middle_row_disks,r)
-    generated_lattice_pts = delArti(generated_lattice_pts,rotated_refined_disks_weights,r)
     rotated_pattern = rotImg(avg_pattern, angle+angle_delta, center_disk)
     vec_a, vec_b= latBack(vec_a_rotated, vec_b_rotated, angle)
 
@@ -102,5 +82,4 @@ if __name__ == '__main__':
         
     plt.subplots_adjust(wspace=0.25,hspace=0.25)
     plt.show()
-    results = saveResults(lattice_params)
-    testResults(results, 'testset.csv')
+    saveResults(lattice_params)
