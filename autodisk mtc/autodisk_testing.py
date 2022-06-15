@@ -1,5 +1,6 @@
 # Imports
 
+from audioop import avg
 from autodisk_mtc import *
 
 if __name__ == '__main__':
@@ -15,6 +16,8 @@ if __name__ == '__main__':
     avg_pattern = generateAvgPattern(data)
     center_disk,r = ctrRadiusIni(avg_pattern)
 
+    bckg_intensity, bckg_std = quantifyBackground(data,center_disk,r)
+    
     # Generate kernel, then cross-correlate
 
     kernel = generateKernel(avg_pattern,center_disk,r)
@@ -44,7 +47,7 @@ if __name__ == '__main__':
     vec_a, vec_b= latBack(vec_a_rotated, vec_b_rotated, angle)
 
     start = time.perf_counter()
-    lattice_params = driver_func(data, kernel, r, center_disk, angle)
+    lattice_params = driver_func(data, kernel, r, center_disk, angle, bckg_intensity, bckg_std)
     print(f'Took {time.perf_counter()-start} seconds to complete')
 
     lat_fil = latDist(lattice_params,vec_a,vec_b)
@@ -82,4 +85,4 @@ if __name__ == '__main__':
         
     plt.subplots_adjust(wspace=0.25,hspace=0.25)
     plt.show()
-    saveResults(lattice_params)
+    saveResults(lat_fil)

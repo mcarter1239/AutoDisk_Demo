@@ -1,6 +1,8 @@
 import copy
 import os
 import time
+from turtle import back
+from unittest import result
 import cv2
 from scipy import stats,signal
 import numpy as np
@@ -419,7 +421,7 @@ def latDist(lattice_params,refe_a,refe_b,err=0.2):
             
             if gax>acc_ax_max or gax<acc_ax_min or gay>acc_ay_max or gay<acc_ay_min or gbx>acc_bx_max or gbx<acc_bx_min or gby>acc_by_max or gby<acc_by_min:
                 ct += 1
-                print(f'Removed vectors for r:{row}, c:{col}. Total removed: {ct}.')
+                
     
             else:
                 store_whole[row,col][0] = gay        
@@ -652,6 +654,7 @@ def ctrDet(pattern, r, kernel, n_sigma=10, thred=0.1, ovl=0):
     blobs_log_out -= f_size 
     
     blobs =  blobs_log_out[:,:2].astype(int)
+
     
     return blobs
 
@@ -1091,7 +1094,7 @@ def latBack(refe_a,refe_b,angle):
     
     return a_init,b_init
 
-def paramConstructor(PROCESSES, data, kernel, r, center_disk, angle):
+def paramConstructor(PROCESSES, data, kernel, r, center_disk, angle, bckg_intensity, bckg_std):
     img_h,img_w,diff_pat_h,diff_pat_w = data.shape
     full_pattern_list = []
     for row_idx in range(img_h):
@@ -1101,22 +1104,24 @@ def paramConstructor(PROCESSES, data, kernel, r, center_disk, angle):
 
     params = []
     for pattern_list in full_pattern_list:
-        params.append((data,pattern_list,kernel,r,center_disk,angle))
+        params.append((data,pattern_list,kernel,r,center_disk,angle,bckg_intensity,bckg_std))
     
     print('-----Params Constructed-----')
     return params
 
-def processPatterns(data, pattern_list, kernel, r, center_disk, angle):
+def processPatterns(data, pattern_list, kernel, r, center_disk, angle, bckg_intensity, bckg_std):
     return_val = []
 
     for pattern_coords in pattern_list:
         row_idx = pattern_coords[0]
         col_idx = pattern_coords[1]
         pattern = data[row_idx,col_idx]
-            
+        if isVacuum(pattern,center_disk, r, bckg_intensity, bckg_std):
+            print(f'Process {os.getpid()} skipped r:{row_idx}, c: {col_idx} for being a vacuum pattern.')
+            continue
         cros_map = crossCorr(pattern,kernel)   
-        disks = ctrDet(cros_map, r, kernel, 10, 10) 
-        
+        disks = ctrDet(cros_map, r, kernel, 10, 10,) 
+        # disks = filterDisks(pattern,disks,r,bckg_intensity,bckg_std)
         if len(disks) > 5:
             ctr_cur,r_cur = ctrRadiusIni(pattern)
             if np.linalg.norm(ctr_cur-center_disk) <= 2: # 2px
@@ -1142,42 +1147,13 @@ def processPatterns(data, pattern_list, kernel, r, center_disk, angle):
 
     return return_val
 
-def processPattern(data, row_idx, col_idx, kernel, r, center_disk, angle):
-    pattern = data[row_idx,col_idx]
-        
-    cros_map = crossCorr(pattern,kernel)   
-    disks = ctrDet(cros_map, r, kernel, 10, 10) 
-    
-    if len(disks) > 5:
-        ctr_cur,r_cur = ctrRadiusIni(pattern)
-        if np.linalg.norm(ctr_cur-center_disk) <= 2: # 2px
-            ctr = ctr_cur
-        else:
-            ctr = center_disk
-            ctr[1] = np.round(ctr[1])
-            ctr[0] = np.round(ctr[0])            
-        
-        ref_ctr = radGradMax(pattern, disks, r,rn=20, ra=2, n_p=40, threshold=3)           
-        
-        ctr_vec = ref_ctr[:,:2] - ctr
-        ctr_diff = ctr_vec[:,0]**2 + ctr_vec[:,1]**2
-        ctr_idx = np.where(ctr_diff==ctr_diff.min())[0][0]
-        ref_ctr[ctr_idx,2] = 10**38
-        rot_ref_ctr = rotCtr(pattern,ref_ctr,angle)
-        ret_a,ret_b,ref_ctr2, mid_ctr,ref_ang = latFit(pattern,rot_ref_ctr,r)
-        
-        if any(ret_a!=0) and any(ret_b!=0):
-            a_back,b_back = latBack(ret_a, ret_b, angle+ref_ang)
-            return_val = [row_idx, col_idx, a_back, b_back]
-            print(f'Process {os.getpid()} returned {return_val} for r:{row_idx}, c: {col_idx}')
-            return return_val
 
-def driver_func(data, kernel, r, center_disk, angle):
+def driver_func(data, kernel, r, center_disk, angle, bckg_intensity, bckg_std):
     img_h,img_w,diff_pat_h,diff_pat_w = data.shape
     PROCESSES = mp.cpu_count()
     print(f'{PROCESSES} cores available')
 
-    params = paramConstructor(PROCESSES, data, kernel, r, center_disk, angle)
+    params = paramConstructor(PROCESSES, data, kernel, r, center_disk, angle, bckg_intensity, bckg_std)
     results = []
     lattice_params = np.zeros((img_h,img_w,2,2),dtype = float)
     with mp.Pool(PROCESSES) as pool:
@@ -1209,12 +1185,10 @@ def driver_func(data, kernel, r, center_disk, angle):
 
     return lattice_params
 
-def radialIntensity(pattern, cen_x=None, cen_y=None, plot=False):
-    if cen_x == None or cen_y == None:    
-        center_disk,r = ctrRadiusIni(pattern)
-        cen_x = center_disk[0]
-        cen_y = center_disk[1]
-    print('here')
+def radialIntensity(pattern, center_disk, r, plot=False):
+    cen_x = center_disk[0]
+    cen_y = center_disk[1]
+    
     # Get image parameters
     a = pattern.shape[0]
     b = pattern.shape[1]
@@ -1234,11 +1208,73 @@ def radialIntensity(pattern, cen_x=None, cen_y=None, plot=False):
 
     if plot:
         plt.plot(rad, intensity)
+        plt.title(f'r = {r}')
         plt.xlabel('Radius (px)')
         plt.ylabel('Intensity')
         plt.show()
     
     return rad, intensity
+
+def quantifyBackground(data, center_disk, r):
+    img_h,img_w,diff_pat_h,diff_pat_w = data.shape
+    bckg = []
+    for row in range(img_h):
+        for col in range(img_w):
+            pattern = data[row,col]
+            masked = maskDisk(pattern,center_disk,r,-1)
+            bckg.append(np.array([np.mean(masked[masked>0]),np.std(masked)]))
+    bckg = np.array(bckg)
+    bckg = bckg[bckg[:, 0].argsort()]  # sort by mean intensity
+    # bckg = bckg[bckg[:, 1].argsort(kind='mergesort')]  # sort by std
+    bckg = bckg[0:int(0.01*img_h*img_w),:]
+    intensity = np.mean(bckg[:,0])
+    std = np.mean(bckg[:,1])
+    print(f'Dataset has average background intensity [{intensity}] with average standard deviation [{std}]. This was calculated from {bckg.size/2} patterns with intensity range [{bckg[0,0]}-{bckg[-1,0]}]')
+    return intensity, std
+
+def isVacuum(pattern, center_disk, r, bckg_intensity, bckg_std):
+    masked = maskDisk(pattern,center_disk,r,-1)
+    if np.mean(masked[masked>0]) > bckg_intensity+0.25*bckg_std:
+        return False
+    return True
+
+def filterDisks(pattern, disks, r, bckg_intensity, bckg_std):
+    results = []
+    for disk in disks:
+        disk_mask = maskDisk(pattern, disk, r, 1)
+        if np.mean(disk_mask[disk_mask>0]) > bckg_intensity+0.25*bckg_std:
+            results.append(disk)
+    results = np.array(results)
+    if disks.shape != results.shape:
+        print(f'{disks.shape} reduced to {results.shape}')
+    return results
+
+def maskDisk(pattern, disk, r, factor):
+
+        ##########################################################
+        #    
+        #   Defines a circular virtual detector at a given position in the pattern and radius.
+        #
+        #   THIS CALL REPLACES THE DEFAULT DETECTOR FOR BFDF IMAGING.
+        #
+        #   Returns the pattern and stores it in the object for later use
+        #
+        #   cenx,ceny: coordinates for the center of the circle (inside the pattern)
+        #   rad: radius of the circle in pixels
+        #   factor: -1 for deteting everything BUT the masked region, +1 for BF/deteting the masked region
+        #   
+        ##########################################################
+        
+        diffpatx,diffpaty = pattern.shape
+        cenx = disk[0]
+        ceny = disk[1]
+        Y,X = np.ogrid[:diffpatx, :diffpaty]
+        dist_from_center = np.sqrt((X - cenx)**2 + (Y - ceny)**2)
+        
+        mask = factor*dist_from_center <= factor*r*1.3
+
+        masked = (pattern*mask)
+        return masked
 
 def saveResults(results):
     filename = str(datetime.now()).split('.')[0].replace(':','_') + '.csv'
@@ -1254,3 +1290,35 @@ def testResults(results_file, test_file):
     for row in results:
         if row not in testset:
             print(row)
+
+
+
+# def processPattern(data, row_idx, col_idx, kernel, r, center_disk, angle):
+#     pattern = data[row_idx,col_idx]
+        
+#     cros_map = crossCorr(pattern,kernel)   
+#     disks = ctrDet(cros_map, r, kernel, 10, 10) 
+    
+#     if len(disks) > 5:
+#         ctr_cur,r_cur = ctrRadiusIni(pattern)
+#         if np.linalg.norm(ctr_cur-center_disk) <= 2: # 2px
+#             ctr = ctr_cur
+#         else:
+#             ctr = center_disk
+#             ctr[1] = np.round(ctr[1])
+#             ctr[0] = np.round(ctr[0])            
+        
+#         ref_ctr = radGradMax(pattern, disks, r,rn=20, ra=2, n_p=40, threshold=3)           
+        
+#         ctr_vec = ref_ctr[:,:2] - ctr
+#         ctr_diff = ctr_vec[:,0]**2 + ctr_vec[:,1]**2
+#         ctr_idx = np.where(ctr_diff==ctr_diff.min())[0][0]
+#         ref_ctr[ctr_idx,2] = 10**38
+#         rot_ref_ctr = rotCtr(pattern,ref_ctr,angle)
+#         ret_a,ret_b,ref_ctr2, mid_ctr,ref_ang = latFit(pattern,rot_ref_ctr,r)
+        
+#         if any(ret_a!=0) and any(ret_b!=0):
+#             a_back,b_back = latBack(ret_a, ret_b, angle+ref_ang)
+#             return_val = [row_idx, col_idx, a_back, b_back]
+#             print(f'Process {os.getpid()} returned {return_val} for r:{row_idx}, c: {col_idx}')
+#             return return_val

@@ -419,7 +419,7 @@ def latDist(lattice_params,refe_a,refe_b,err=0.2):
             
             if gax>acc_ax_max or gax<acc_ax_min or gay>acc_ay_max or gay<acc_ay_min or gbx>acc_bx_max or gbx<acc_bx_min or gby>acc_by_max or gby<acc_by_min:
                 ct += 1
-                print(f'Removed vectors for r:{row}, c:{col}. Total removed: {ct}.')
+                
     
             else:
                 store_whole[row,col][0] = gay        
