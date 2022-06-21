@@ -1,6 +1,5 @@
 # Imports
 
-from audioop import avg
 from autodisk_mtc import *
 
 if __name__ == '__main__':
@@ -11,6 +10,7 @@ if __name__ == '__main__':
     data = preProcess(data)
     img_h,img_w,diff_pat_h,diff_pat_w = data.shape
     print(img_h)
+    
     # Determine center disk position and radius from sum pattern
 
     avg_pattern = generateAvgPattern(data)
@@ -40,6 +40,10 @@ if __name__ == '__main__':
 
     # Fit the rotated disks to a set of two basis vectors
     vec_a_rotated,vec_b_rotated,rotated_refined_disks_weights, middle_row_disks,angle_delta = latFit(avg_pattern,rotated_refined_disks_weights,r)
+
+    radialIntensity(avg_pattern,center_disk,r,True)
+    vecs_mtc = mtc_latfit(refined_disks_list[:,0:2],center_disk,r)
+    print(vecs_mtc)
 
     print('Two lattice vectors: vector_a--[',vec_a_rotated[0],vec_a_rotated[1], '] and vector_b--[',vec_b_rotated[0],vec_b_rotated[1],']')
 

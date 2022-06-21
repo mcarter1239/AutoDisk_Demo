@@ -1183,6 +1183,7 @@ def driver_func(data, kernel, r, center_disk, angle):
     with mp.Pool(PROCESSES) as pool:
         for p in params:
             results.append(pool.apply_async(processPatterns, p))
+            print('param appended')
         n = 0
         while True:
             time.sleep(1)

@@ -1,18 +1,20 @@
 import copy
+import csv
+import multiprocessing as mp
 import os
 import time
-from turtle import back
-from unittest import result
+from datetime import datetime
+from tokenize import group
+
 import cv2
-from scipy import stats,signal
+import matplotlib.pyplot as plt
 import numpy as np
-from skimage.transform import resize
+from scipy import signal, stats
 from skimage import feature
 from skimage.feature import blob_log
-import matplotlib.pyplot as plt
-import multiprocessing as mp
-from datetime import datetime
-import csv
+from skimage.transform import resize
+from sqlalchemy import distinct
+
 
 def readData(dname):   
     """
@@ -1094,6 +1096,97 @@ def latBack(refe_a,refe_b,angle):
     
     return a_init,b_init
 
+def angle_of(disk):
+    angle = np.degrees(np.arctan2(disk[0], disk[1]))
+    if angle < 0:
+        angle = 360 + angle
+    return angle
+
+def mtc_latfit(disks,center_disk,r):
+    # Assume that the disks are already perfectly fit to the pattern they were generated from, and that the center disk position and radius is correct
+    # Label disks with distance to center disk and rotation angle relative to an origin at center disk
+    labeled_disks = []
+    for disk in disks:
+        dist_to_center = np.linalg.norm(disk - center_disk)
+        if dist_to_center < 5:
+            continue
+        angle = angle_of(disk-center_disk)
+        labeled_disk = [disk[0], disk[1], dist_to_center, angle]
+
+        labeled_disks.append(labeled_disk)
+
+    labeled_disks = np.array(labeled_disks)
+
+    # Group disks with same distance, filter colinear pairs
+
+    labeled_disks = labeled_disks[labeled_disks[:, 2].argsort()] # sort by distance to center
+    n = len(labeled_disks)
+    i = 0
+    grouped_disks = []
+    threshold = 0.5*r
+    while i < n:
+        dist_i = labeled_disks[i,2]
+        # Check disks with greater distance until difference in distances is greater than threshold.  Then append all those disks to grouped_disks, and set i to the next highest index outside that group.
+        for j in range(n):
+            dist_j = labeled_disks[j,2]
+            # Ignore all disks with a lower or equal distance
+            if dist_j <= dist_i:
+                continue
+            if (dist_j - dist_i) > threshold:
+                grouped_disks.append(labeled_disks[i:j-1,:])
+                i = j-1
+                break
+        i += 1
+    
+
+    
+    for group in grouped_disks:
+        group = filterColinear(group)
+
+    # Choose lowest angle nearest neighbor as vec a
+    # grouped_disks structure => [group, disk, disk_properties[x,y,dist,angle]]
+
+    vec_a = grouped_disks[0][0][0:2]-center_disk
+
+    # If other nearest neighbor exists that is not colinear, choose next lowest angle nearest neighbor as vec b
+
+    if len(grouped_disks[0]) > 1:
+        vec_b = grouped_disks[0,1,0:2]-center_disk
+        return np.array([vec_a, vec_b])
+
+    # Else choose second nearest neighbor with the next lowest angle (other disk angles > vec b angle > vec a angle) as vec b
+    else:
+        vec_a_angle = grouped_disks[0,0,3]
+        for disk in grouped_disks[1]:
+            if disk[3] > vec_a_angle:
+                vec_b = disk[0:2]-center_disk
+                return np.array([vec_a, vec_b])
+        return np.array([0,0])
+        
+
+
+def filterColinear(group, tolerance=5):
+    for i in range(len(group)):
+        if np.array_equal(group[i],[-1,-1,-1,-1]):
+                continue
+        for j in range(len(group)):
+            if np.array_equal(group[i],[-1,-1,-1,-1]):
+                continue
+            angle_ij = np.abs(group[i,3]-group[j,3])
+            if angle_ij > 180-tolerance and angle_ij < 180+tolerance:
+                group[j] = [-1,-1,-1,-1]
+
+    result = []
+    for disk in group:
+        if not np.array_equal(disk,[-1,-1,-1,-1]):
+            result.append(disk)
+    
+    result = np.array(result)
+    print(result)
+    return result
+
+            
+
 def paramConstructor(PROCESSES, data, kernel, r, center_disk, angle, bckg_intensity, bckg_std):
     img_h,img_w,diff_pat_h,diff_pat_w = data.shape
     full_pattern_list = []
@@ -1186,8 +1279,8 @@ def driver_func(data, kernel, r, center_disk, angle, bckg_intensity, bckg_std):
     return lattice_params
 
 def radialIntensity(pattern, center_disk, r, plot=False):
-    cen_x = center_disk[0]
-    cen_y = center_disk[1]
+    cen_x = center_disk[1]
+    cen_y = center_disk[0]
     
     # Get image parameters
     a = pattern.shape[0]
@@ -1221,12 +1314,14 @@ def quantifyBackground(data, center_disk, r):
     for row in range(img_h):
         for col in range(img_w):
             pattern = data[row,col]
-            masked = maskDisk(pattern,center_disk,r,-1)
-            bckg.append(np.array([np.mean(masked[masked>0]),np.std(masked)]))
+            masked = maskDisk(pattern,center_disk,r,-1) # mask out the center disk
+            bckg.append(np.array([np.mean(masked[masked>0]),np.std(masked[masked>0])]))
     bckg = np.array(bckg)
     bckg = bckg[bckg[:, 0].argsort()]  # sort by mean intensity
-    # bckg = bckg[bckg[:, 1].argsort(kind='mergesort')]  # sort by std
+
+    # Take the lowest 1% of mean intensities (assuming at least 1% of the image is vacuum)
     bckg = bckg[0:int(0.01*img_h*img_w),:]
+
     intensity = np.mean(bckg[:,0])
     std = np.mean(bckg[:,1])
     print(f'Dataset has average background intensity [{intensity}] with average standard deviation [{std}]. This was calculated from {bckg.size/2} patterns with intensity range [{bckg[0,0]}-{bckg[-1,0]}]')
@@ -1266,8 +1361,8 @@ def maskDisk(pattern, disk, r, factor):
         ##########################################################
         
         diffpatx,diffpaty = pattern.shape
-        cenx = disk[0]
-        ceny = disk[1]
+        cenx = disk[1]
+        ceny = disk[0]
         Y,X = np.ogrid[:diffpatx, :diffpaty]
         dist_from_center = np.sqrt((X - cenx)**2 + (Y - ceny)**2)
         

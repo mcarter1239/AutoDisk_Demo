@@ -13,6 +13,7 @@ if __name__ == '__main__':
     # Determine center disk position and radius from sum pattern
 
     avg_pattern = generateAvgPattern(data)
+    visual(avg_pattern)
     center_disk,r = ctrRadiusIni(avg_pattern)
 
     # Generate kernel, then cross-correlate
